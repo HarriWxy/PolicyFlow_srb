@@ -15,8 +15,6 @@ MultiGoal Test: Sample 1000 trajectories starting at the same original point.
 
 In the main branch, we provide training scripts for: **IsaacLab environments** (currently among the most widely used robotics simulation frameworks), **MultiGoal** and **Gym environments**, where the scripts serve as clear examples for users who wish to register and train their own custom environments.
 
-In the [mujoco_playground](xxx) branch, we additionally include example scripts for training agents in the MuJoCo Playground benchmark environments.
-
 These scripts are intended to be lightweight, easy to read, and helpful for users who want to quickly adapt our algorithms to their own tasks.
 
 ---
