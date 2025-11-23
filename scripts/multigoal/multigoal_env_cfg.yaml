@@ -1,0 +1,29 @@
+name: multigoal
+
+# environment parameters
+num_envs: 4096
+max_episode_length: 50
+clip_actions: 5.0
+dt: 0.1
+device: 'cuda'
+
+only_positive_rewards: False
+send_timeouts: True
+check_collide_wall: True
+random_init_episode_length: True
+
+xlim: [-8.0, 8.0]
+ylim: [-8.0, 8.0]
+
+num_goals: 6
+goal_radius: 5.0
+goal_center: [0.0, 0.0]
+
+# evaluation parameters
+eval_num_envs: 1000
+
+# rewards
+rewards:
+  scales:
+    distance_cost: 1.0
+    action_cost: -0.01
