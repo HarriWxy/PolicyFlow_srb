@@ -45,7 +45,7 @@ These scripts are intended to be lightweight, easy to read, and helpful for user
    After setting up the environment and optional dependencies, clone this repository and install PolicyFlow in editable mode.
 
     ```bash
-    git clone https://github.com/MoreInfoy/PolicyFlow.git
+    git clone https://github.com/PolicyFlow2026/PolicyFlow.git
     cd PolicyFlow/policyflow
     pip install -e .
     ```
