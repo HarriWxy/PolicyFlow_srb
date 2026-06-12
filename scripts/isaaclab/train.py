@@ -49,6 +49,7 @@ from policyflow_torch.runners import IsaaclabRunner
 import isaaclab_tasks  # noqa: F401
 from isaaclab_tasks.utils.hydra import hydra_task_config
 import register_envs
+import register_srb_envs
 
 torch.backends.cuda.matmul.allow_tf32 = True
 torch.backends.cudnn.allow_tf32 = True
