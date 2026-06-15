@@ -224,9 +224,39 @@ class ContinuousNormalizingFlow:
                 dtype=torch.float32,
                 device=self.device,
             )
-
+            # 二阶龙格-库塔法（Runge-Kutta 2nd Order, RK2）
             delta_t = self.sample_step_schedule[i + 1] - self.sample_step_schedule[i]
-            vel_t = model["flow"](xt, t, condition_embeded)
+            vel_t = model["flow"](xt, t, condition_embeded)  # flow.flow_net FlowMlp(FlowNetBase)
+            xt_middle = xt + vel_t * delta_t / 2
+            vel_t = model["flow"](xt_middle, t + delta_t / 2, condition_embeded)
+            xt = xt + delta_t * vel_t
+
+        std = torch.ones_like(xt) * model["variance"].std
+        return xt.detach(), std.detach()
+    
+    def sample_dor(self,
+        x0: torch.Tensor,
+        condition: torch.Tensor,
+        # ----------------- sampling ----------------- #
+        n_samples: int = 1,
+    ):
+        x0 = x0.to(self.device)
+
+        model = self.model if not self.using_ema else self.model_ema
+
+        xt = x0.clone()
+        condition_embeded = model["condition"](condition)
+
+        for i in range(self.sample_steps):
+            t = torch.full(
+                (n_samples,),
+                self.sample_step_schedule[i],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            # 二阶龙格-库塔法（Runge-Kutta 2nd Order, RK2）
+            delta_t = self.sample_step_schedule[i + 1] - self.sample_step_schedule[i]
+            vel_t = model["flow"](xt, t, condition_embeded)  # flow.flow_net FlowMlp(FlowNetBase)
             xt_middle = xt + vel_t * delta_t / 2
             vel_t = model["flow"](xt_middle, t + delta_t / 2, condition_embeded)
             xt = xt + delta_t * vel_t

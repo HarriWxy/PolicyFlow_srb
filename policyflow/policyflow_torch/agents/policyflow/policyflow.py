@@ -6,6 +6,7 @@ from policyflow_torch.modules import Network, ContinuousNormalizingFlow
 from policyflow_torch.agents import PolicyFlowBase
 from policyflow_torch.storage import ReplayBuffer
 from policyflow_torch.utils.kl_adaptive import KLAdaptiveLR
+# from policyflow_torch.modules.flow.flow import ContinuousNormalizingFlow as cf
 
 
 class PolicyFlow(PolicyFlowBase):
@@ -119,6 +120,7 @@ class PolicyFlow(PolicyFlowBase):
     def draw_actions(
         self, observations_dict: Dict[str, torch.Tensor], env_info: Dict[str, Any]
     ) -> Tuple[torch.Tensor, Union[Dict[str, torch.Tensor], None]]:
+        '''Draw actions from the policy'''
 
         x0 = torch.randn(
             (
@@ -131,7 +133,7 @@ class PolicyFlow(PolicyFlowBase):
         if self._degenerate2gaussian:
             x0 = torch.zeros_like(x0)
 
-        actions_prior, std = self.model_dict["actor"].sample(
+        actions_prior, std = self.model_dict["actor"].sample(  # policyflow_torch.modules.flow.flow ContinuousNormalizingFlow
             x0=x0,
             condition=observations_dict["actor_observations"],
             n_samples=observations_dict["actor_observations"].shape[0],

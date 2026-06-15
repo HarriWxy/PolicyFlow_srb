@@ -23,12 +23,13 @@ class IsaacGymEnvWrapper(Wrapper):
         :return: Observation, reward, terminated, truncated, info
         :rtype: tuple of torch.Tensor and any other info
         """
-        observations_dict, reward, terminated, env_info = self._env.step(actions)
+        obs_dict, reward, terminated, truncated, env_info = self._env.step(actions)
+        dones = (terminated | truncated).to(dtype=torch.long)
 
         return (
-            observations_dict,
+            obs_dict,
             reward,
-            terminated,
+            dones,
             env_info,
         )
 

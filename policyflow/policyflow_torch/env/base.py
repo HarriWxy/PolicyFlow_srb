@@ -1,5 +1,5 @@
 from typing import Any, Mapping, Sequence, Tuple, Union, Dict
-import gym
+import gymnasium as gym
 import torch
 
 

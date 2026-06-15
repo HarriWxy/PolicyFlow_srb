@@ -2,10 +2,10 @@ from typing import Any, Tuple, Dict
 import torch
 from .base import Wrapper
 import gymnasium as gym
-import gymnasium_robotics
+# import gymnasium_robotics
 import numpy as np
 
-gym.register_envs(gymnasium_robotics)
+# gym.register_envs(gymnasium_robotics)
 
 
 class GymEnvWrapper(Wrapper):

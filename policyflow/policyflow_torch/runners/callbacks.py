@@ -61,24 +61,25 @@ def make_tensorboard_cb(directory):
         writer.add_scalar("Train/mean_reward", mean_reward, it)
         writer.add_scalar("Train/mean_episode_length", mean_steps, it)
 
-        info: dict = stat["info"]
+        info = stat.get("info", [])
 
-        for key in info[0]:
-            info_tensor = torch.tensor([], device=runner._device)
-            for ep_info in info:
-                # handle scalar and zero dimensional tensor infos
-                if key not in ep_info:
-                    continue
-                if not isinstance(ep_info[key], torch.Tensor):
-                    ep_info[key] = torch.Tensor([ep_info[key]])
-                if len(ep_info[key].shape) == 0:
-                    ep_info[key] = ep_info[key].unsqueeze(0)
-                info_tensor = torch.cat((info_tensor, ep_info[key].to(runner._device)))
-            value = torch.mean(info_tensor)
-            # log to logger and terminal
-            if "/" in key:
-                writer.add_scalar(key, value, it)
-            else:
-                writer.add_scalar("Episode/" + key, value, it)
+        if info:
+            for key in info[0]:
+                info_tensor = torch.tensor([], device=runner._device)
+                for ep_info in info:
+                    # handle scalar and zero dimensional tensor infos
+                    if key not in ep_info:
+                        continue
+                    if not isinstance(ep_info[key], torch.Tensor):
+                        ep_info[key] = torch.Tensor([ep_info[key]])
+                    if len(ep_info[key].shape) == 0:
+                        ep_info[key] = ep_info[key].unsqueeze(0)
+                    info_tensor = torch.cat((info_tensor, ep_info[key].to(runner._device)))
+                value = torch.mean(info_tensor)
+                # log to logger and terminal
+                if "/" in key:
+                    writer.add_scalar(key, value, it)
+                else:
+                    writer.add_scalar("Episode/" + key, value, it)
 
     return cb
