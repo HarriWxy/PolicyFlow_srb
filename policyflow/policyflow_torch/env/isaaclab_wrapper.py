@@ -1,5 +1,6 @@
 from typing import Any, Tuple, Dict
 import torch
+import warnings
 from policyflow_torch.env import Wrapper
 from collections import deque
 
@@ -7,6 +8,22 @@ try:
     from isaaclab.envs import DirectRLEnv, ManagerBasedRLEnv
 except:
     pass
+
+
+def _sanitize_tensor(tensor: torch.Tensor, name: str = "tensor") -> torch.Tensor:
+    """检测并修复张量中的 NaN/Inf 值，用 0 替换。返回是否包含非法值。"""
+    nan_mask = torch.isnan(tensor)
+    inf_mask = torch.isinf(tensor)
+    bad_mask = nan_mask | inf_mask
+    if bad_mask.any():
+        n_bad = bad_mask.sum().item()
+        n_total = tensor.numel()
+        warnings.warn(
+            f"[NaN Guard] {name}: {n_bad}/{n_total} values are NaN/Inf, replacing with 0"
+        )
+        tensor = tensor.clone()
+        tensor[bad_mask] = 0.0
+    return tensor
 
 
 class IsaacLabEnvWrapper(Wrapper):
@@ -50,6 +67,13 @@ class IsaacLabEnvWrapper(Wrapper):
         """
         # record step information
         obs_dict, reward, terminated, truncated, env_info = self._env.step(actions)
+
+        # === NaN Guard: 在数据进入 agent 之前消毒 ===
+        obs_dict["policy"] = _sanitize_tensor(obs_dict["policy"], "obs/policy")
+        if "critic" in obs_dict:
+            obs_dict["critic"] = _sanitize_tensor(obs_dict["critic"], "obs/critic")
+        reward = _sanitize_tensor(reward, "reward")
+
         # compute dones for compatibility with PolicyFlow
         dones = (terminated | truncated).to(dtype=torch.long)
 
@@ -107,6 +131,11 @@ class IsaacLabEnvWrapper(Wrapper):
         :rtype: torch.Tensor and any other info
         """
         obs_dict, env_info = self._env.reset()
+
+        # === NaN Guard: 消毒 reset 后的观测值 ===
+        obs_dict["policy"] = _sanitize_tensor(obs_dict["policy"], "reset/obs/policy")
+        if "critic" in obs_dict:
+            obs_dict["critic"] = _sanitize_tensor(obs_dict["critic"], "reset/obs/critic")
 
         if self._using_historical_obs:
             for _ in range(self.actor_obs_buffer.maxlen):

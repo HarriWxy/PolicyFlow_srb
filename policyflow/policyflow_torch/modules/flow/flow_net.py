@@ -125,8 +125,8 @@ class LearnableVariance(nn.Module):
     def __init__(
         self,
         dims: int,
-        log_std_max: float = 4.0,
-        log_std_min: float = -20.0,
+        log_std_max: float = 2.0,
+        log_std_min: float = -5.0,
         std_init: float = 1.0,
     ):
         super().__init__()

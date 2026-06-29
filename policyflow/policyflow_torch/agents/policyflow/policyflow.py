@@ -6,6 +6,7 @@ from policyflow_torch.modules import Network, ContinuousNormalizingFlow
 from policyflow_torch.agents import PolicyFlowBase
 from policyflow_torch.storage import ReplayBuffer
 from policyflow_torch.utils.kl_adaptive import KLAdaptiveLR
+from torch.amp import autocast, GradScaler
 # from policyflow_torch.modules.flow.flow import ContinuousNormalizingFlow as cf
 
 
@@ -59,6 +60,11 @@ class PolicyFlow(PolicyFlowBase):
             ),
         )
         self._register_serializable("optimizer")
+
+        # Mixed precision training
+        self._use_amp = cfg.get("use_amp", True) and self.device.type == "cuda"
+        self._amp_device_type = self.device.type if self.device.type != "mps" else "cpu"
+        self.scaler = GradScaler(enabled=self._use_amp)
 
     def init_replay_buffer(
         self,
@@ -128,16 +134,23 @@ class PolicyFlow(PolicyFlowBase):
                 self._action_size,
             ),
             device=self.device,
-        )
+        )  # sample from standard normal distribution
         
         if self._degenerate2gaussian:
             x0 = torch.zeros_like(x0)
 
-        actions_prior, std = self.model_dict["actor"].sample(  # policyflow_torch.modules.flow.flow ContinuousNormalizingFlow
+        actions_prior, std = self.model_dict["actor"].sample_dor(  # policyflow_torch.modules.flow.flow ContinuousNormalizingFlow
             x0=x0,
             condition=observations_dict["actor_observations"],
             n_samples=observations_dict["actor_observations"].shape[0],
         )
+
+        # prevent NaN/Inf into replay buffer
+        if torch.isnan(actions_prior).any() or torch.isinf(actions_prior).any():
+            actions_prior = torch.zeros_like(actions_prior)
+        if torch.isnan(std).any() or torch.isinf(std).any():
+            std = torch.ones_like(std)
+
         delta_action_distribution = torch.distributions.Normal(
             torch.zeros_like(actions_prior), std
         )
@@ -190,7 +203,7 @@ class PolicyFlow(PolicyFlowBase):
             )
 
     def compute_gae(self) -> torch.Tensor:
-        """Compute the Generalized Advantage Estimator (GAE)"""
+        """Compute the Generalized Advantage Estimator (GAE) using vectorized operations"""
         rewards = self.replay_buffer.get_tensor_by_name("rewards")
         values = self.replay_buffer.get_tensor_by_name("values")
         dones = self.replay_buffer.get_tensor_by_name("terminated")
@@ -203,22 +216,21 @@ class PolicyFlow(PolicyFlowBase):
                 next_critic_observations.flatten(start_dim=1)
             ).detach()
 
-        advantage = 0
-        advantages = torch.zeros_like(rewards)
-        not_dones = dones.logical_not()
         memory_size = rewards.shape[0]
+        not_dones = dones.logical_not().float()
 
-        # advantages computation
+        # Vectorized GAE computation
+        next_values = torch.cat([values[1:], last_values.unsqueeze(0)], dim=0)
+        delta = rewards + self._discount_factor * not_dones * next_values - values
+
+        # Compute GAE using reverse accumulation
+        advantages = torch.zeros_like(rewards)
+        advantage = torch.zeros_like(rewards[0])
+        discount = self._discount_factor * self._lambda
         for i in reversed(range(memory_size)):
-            next_values = values[i + 1] if i < memory_size - 1 else last_values
-            advantage = (
-                rewards[i]
-                - values[i]
-                + self._discount_factor
-                * not_dones[i]
-                * (next_values + self._lambda * advantage)
-            )
+            advantage = delta[i] + discount * not_dones[i] * advantage
             advantages[i] = advantage
+
         # returns computation
         returns = advantages + values
         # normalize advantages
@@ -273,93 +285,114 @@ class PolicyFlow(PolicyFlowBase):
                 sampled_returns,
                 sampled_advantages,
             ) in sampled_batches:
-                if not self._degenerate2gaussian and self._brownian_reg_loss_scale > 0:
-                    delta_vel, delta_std_new, brownian_reg_loss = self.model_dict[
-                        "actor"
-                    ].compute_flow_variation(
-                        x1=sampled_actions_prior,
-                        condition=sampled_actor_observations,
-                        x0=sampled_flow_x0,
-                        compute_brownian_reg_loss=True,
+                # Mixed precision forward pass
+                with autocast(device_type=self._amp_device_type, enabled=self._use_amp):
+                    if not self._degenerate2gaussian and self._brownian_reg_loss_scale > 0:
+                        delta_vel, delta_std_new, brownian_reg_loss = self.model_dict[
+                            "actor"
+                        ].compute_flow_variation(
+                            x1=sampled_actions_prior,
+                            condition=sampled_actor_observations,
+                            x0=sampled_flow_x0,
+                            compute_brownian_reg_loss=True,
+                        )
+                        if "anneal_coef" in self.model_dict:
+                            brownian_reg_loss = (
+                                self._brownian_reg_loss_scale
+                                * self.model_dict["anneal_coef"].forward()
+                                * brownian_reg_loss
+                            )
+                        else:
+                            brownian_reg_loss = (
+                                self._brownian_reg_loss_scale * brownian_reg_loss
+                            )
+                    else:
+                        delta_vel, delta_std_new = self.model_dict[
+                            "actor"
+                        ].compute_flow_variation(
+                            x1=sampled_actions_prior,
+                            condition=sampled_actor_observations,
+                            x0=sampled_flow_x0,
+                            compute_brownian_reg_loss=False,
+                        )
+                        brownian_reg_loss = 0
+
+                    # NaN/Inf 检测：跳过有毒 batch，避免腐蚀模型权重
+                    if (
+                        torch.isnan(delta_vel).any()
+                        or torch.isinf(delta_vel).any()
+                        or torch.isnan(delta_std_new).any()
+                        or torch.isinf(delta_std_new).any()
+                    ):
+                        self.optimizer.zero_grad()
+                        continue
+
+                    action_distribution_new = torch.distributions.Normal(
+                        delta_vel, delta_std_new
                     )
-                    if "anneal_coef" in self.model_dict:
-                        brownian_reg_loss = (
-                            self._brownian_reg_loss_scale
-                            * self.model_dict["anneal_coef"].forward()
-                            * brownian_reg_loss
+                    actions_log_prob_new = action_distribution_new.log_prob(
+                        sampled_delta_actions
+                    ).sum(-1)
+
+                    # compute approximate KL divergence
+                    kl_divergences.append(
+                        self._compute_kl_divergence(
+                            delta_vel,
+                            delta_std_new,
+                            torch.zeros_like(delta_vel),
+                            sampled_delta_actions_std,
+                        )
+                    )
+
+                    # compute entropy loss
+                    if self._gaussian_entropy_loss_scale:
+                        gaussian_entropy_loss = (
+                            -self._gaussian_entropy_loss_scale
+                            * action_distribution_new.entropy().sum(dim=-1).mean()
                         )
                     else:
-                        brownian_reg_loss = (
-                            self._brownian_reg_loss_scale * brownian_reg_loss
+                        gaussian_entropy_loss = 0
+
+                    # compute policy loss (log-space ratio to prevent exp overflow)
+                    log_ratio = actions_log_prob_new - sampled_delta_actions_log_prob
+                    ratio = torch.exp(torch.clamp(log_ratio, max=5.0))  # 防止 exp 溢出
+                    surrogate = sampled_advantages * ratio
+                    surrogate_clipped = sampled_advantages * torch.clip(
+                        ratio, 1.0 - self._ratio_clip, 1.0 + self._ratio_clip
+                    )
+                    policy_loss = -torch.min(surrogate, surrogate_clipped).mean()
+
+                    # compute value regression loss
+                    predicted_values = self.model_dict["critic"](
+                        sampled_critic_observations
+                    )
+                    if self._clip_predicted_values:
+                        predicted_values = sampled_values + torch.clip(
+                            predicted_values - sampled_values,
+                            min=-self._value_clip,
+                            max=self._value_clip,
                         )
-                else:
-                    delta_vel, delta_std_new = self.model_dict[
-                        "actor"
-                    ].compute_flow_variation(
-                        x1=sampled_actions_prior,
-                        condition=sampled_actor_observations,
-                        x0=sampled_flow_x0,
-                        compute_brownian_reg_loss=False,
+                    value_loss = self._value_loss_scale * torch.nn.functional.mse_loss(
+                        sampled_returns, predicted_values
                     )
-                    brownian_reg_loss = 0
 
-                action_distribution_new = torch.distributions.Normal(
-                    delta_vel, delta_std_new
-                )
-                actions_log_prob_new = action_distribution_new.log_prob(
-                    sampled_delta_actions
-                ).sum(-1)
-
-                # compute approximate KL divergence
-                kl_divergences.append(
-                    self._compute_kl_divergence(
-                        delta_vel,
-                        delta_std_new,
-                        torch.zeros_like(delta_vel),
-                        sampled_delta_actions_std,
+                    # optimization step
+                    self.optimizer.zero_grad()
+                    total_loss = (
+                        policy_loss
+                        + gaussian_entropy_loss
+                        + brownian_reg_loss
+                        + value_loss
                     )
-                )
 
-                # compute entropy loss
-                if self._gaussian_entropy_loss_scale:
-                    gaussian_entropy_loss = (
-                        -self._gaussian_entropy_loss_scale
-                        * action_distribution_new.entropy().sum(dim=-1).mean()
-                    )
-                else:
-                    gaussian_entropy_loss = 0
+                    # 最后一道防线：如果总 loss 是 NaN/Inf，跳过此次更新
+                    if torch.isnan(total_loss) or torch.isinf(total_loss):
+                        self.optimizer.zero_grad()
+                        continue
 
-                # compute policy loss
-                ratio = torch.exp(actions_log_prob_new - sampled_delta_actions_log_prob)
-                surrogate = sampled_advantages * ratio
-                surrogate_clipped = sampled_advantages * torch.clip(
-                    ratio, 1.0 - self._ratio_clip, 1.0 + self._ratio_clip
-                )
-                policy_loss = -torch.min(surrogate, surrogate_clipped).mean()
-
-                # compute value regression loss
-                predicted_values = self.model_dict["critic"](
-                    sampled_critic_observations
-                )
-                if self._clip_predicted_values:
-                    predicted_values = sampled_values + torch.clip(
-                        predicted_values - sampled_values,
-                        min=-self._value_clip,
-                        max=self._value_clip,
-                    )
-                value_loss = self._value_loss_scale * torch.nn.functional.mse_loss(
-                    sampled_returns, predicted_values
-                )
-
-                # optimization step
-                self.optimizer.zero_grad()
-                (
-                    policy_loss
-                    + gaussian_entropy_loss
-                    + brownian_reg_loss
-                    + value_loss
-                ).backward()
+                self.scaler.scale(total_loss).backward()
                 if self._grad_norm_clip > 0:
+                    self.scaler.unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(
                         itertools.chain(
                             self.model_dict["actor"].model.parameters(),
@@ -367,7 +400,8 @@ class PolicyFlow(PolicyFlowBase):
                         ),
                         self._grad_norm_clip,
                     )
-                self.optimizer.step()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
 
                 if self.model_dict["actor"].using_ema:
                     self.model_dict["actor"].ema_update()
@@ -381,9 +415,9 @@ class PolicyFlow(PolicyFlowBase):
                     cumulative_brownian_reg_loss += brownian_reg_loss.item()
 
                 if torch.max(delta_vel) > delta_vel_max:
-                    delta_vel_max = torch.max(delta_vel)
+                    delta_vel_max = torch.max(delta_vel).item()
                 if torch.min(delta_vel) < delta_vel_min:
-                    delta_vel_min = torch.min(delta_vel)
+                    delta_vel_min = torch.min(delta_vel).item()
 
             # update learning rate
             kl = torch.tensor(kl_divergences, device=self.device).mean()
@@ -399,8 +433,8 @@ class PolicyFlow(PolicyFlowBase):
             "Loss/value_loss": cumulative_value_loss
             / (self._learning_epochs * self._mini_batches),
             "Policy/mean_noise_std": delta_std_new.mean().item(),
-            "Policy/delta_vel_max": delta_vel_max.item(),
-            "Policy/delta_vel_min": delta_vel_min.item(),
+            "Policy/delta_vel_max": delta_vel_max,
+            "Policy/delta_vel_min": delta_vel_min,
             "Loss/learning_rate": self.lr_schedule.get_last_lr()[0],
             "Loss/kl": kl.item(),
         }

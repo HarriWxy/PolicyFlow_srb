@@ -145,13 +145,18 @@ def main(
         models=models,
         replay_buffer=replay_buffer,
         device=wrapped_env.device,
-        cfg=agent_cfg.__dict__,
+        cfg={**agent_cfg.__dict__, "use_amp": True},
     )
     agent.init_replay_buffer(
         critic_observation_size=critic_observations_size,
         actor_observation_size=actor_observations_size,
         action_size=num_actions,
     )
+
+    # Enable torch.compile for additional speedup (requires PyTorch 2.0+)
+    if hasattr(torch, 'compile') and not args_cli.video:
+        print("[INFO] Enabling torch.compile() for model optimization")
+        agent.model_dict["critic"] = torch.compile(agent.model_dict["critic"], mode="reduce-overhead")
 
     runner_cfg["max_iterations"] = (
         args_cli.max_iterations
