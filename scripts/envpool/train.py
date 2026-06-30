@@ -3,8 +3,9 @@ import sys
 import cli_args
 
 import torch
+# import envpool
 
-from policyflow.policyflow_torch.env import GymEnvWrapper
+from policyflow.policyflow_torch.env import EnvPoolWrapper
 from policyflow.policyflow_torch.storage import ReplayBuffer
 from policyflow.policyflow_torch.modules import (
     Network,
@@ -21,11 +22,13 @@ torch.backends.cudnn.allow_tf32 = True
 torch.backends.cudnn.deterministic = False
 torch.backends.cudnn.benchmark = False
 
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 def main():
-    alg_name = "ppo"  # or "ppo"
-    env_name = "PointMaze_Medium_Diverse_GDense-v3"
-    wrapped_env = GymEnvWrapper(env_name, 2048)
+    alg_name = "ppo"  # or "ppo" policyflow
+    env_name = "Ant-v5"
+    wrapped_env = EnvPoolWrapper(env_name, num_envs=2048)
 
     obs_dict, _ = wrapped_env.reset()
     critic_observations_size = obs_dict["critic_observations"].shape[1]
@@ -38,7 +41,7 @@ def main():
         num_envs=wrapped_env.num_envs,
         device=wrapped_env.device,
     )
-    num_actions = wrapped_env.action_space.shape[1]
+    num_actions = wrapped_env.single_action_space.shape[0]
     
     if alg_name == "policyflow":
         model_cfg_dict = cli_args.get_policyflow_models_cfg()
