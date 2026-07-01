@@ -40,13 +40,6 @@ def make_tensorboard_cb(directory):
             training_info = stat["training_info"]
             for key, value in training_info.items():
                 writer.add_scalar(key, value, it)
-                
-            # writer.add_scalar("Loss/policy", training_info["policy_loss"], it)
-            # writer.add_scalar("Loss/value", training_info["value_loss"], it)
-            # writer.add_scalar("Loss/entropy", training_info["entropy_loss"], it)
-            # writer.add_scalar("Train/policy_std", training_info["policy_std"], it)
-            # writer.add_scalar("Train/kl", training_info["kl"], it)
-            # writer.add_scalar("Train/learning_rate", training_info["learning_rate"], it)
 
         mean_reward = (
             sum(stat["returns"]) / len(stat["returns"])
@@ -58,8 +51,29 @@ def make_tensorboard_cb(directory):
             if len(stat["lengths"]) > 0
             else 0.0
         )
-        writer.add_scalar("Train/mean_reward", mean_reward, it)
-        writer.add_scalar("Train/mean_episode_length", mean_steps, it)
+        writer.add_scalar("rollout/ep_rew_mean", mean_reward, it)
+        writer.add_scalar("rollout/ep_len_mean", mean_steps, it)
+
+        # Log reward_terms (matching SB3 RewardTermsTensorboardCallback)
+        reward_terms_list = stat.get("reward_terms", [])
+        if reward_terms_list:
+            reward_terms_by_name = {}
+            for step_reward_terms in reward_terms_list:
+                if not isinstance(step_reward_terms, dict):
+                    continue
+                for name, value in step_reward_terms.items():
+                    if isinstance(value, torch.Tensor):
+                        vals = value.detach().cpu().float().flatten().tolist()
+                    elif hasattr(value, '__iter__'):
+                        vals = [float(v) for v in value]
+                    else:
+                        vals = [float(value)]
+                    reward_terms_by_name.setdefault(name, []).extend(vals)
+            for name, values in sorted(reward_terms_by_name.items()):
+                if values:
+                    import numpy
+                    mean_val = float(numpy.asarray(values, dtype=numpy.float32).mean())
+                    writer.add_scalar(f"rollout/reward_terms/{name}", mean_val, it)
 
         info = stat.get("info", [])
 

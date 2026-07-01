@@ -63,6 +63,7 @@ class IsaaclabRunner:
             "info": [],
             "lengths": [],
             "returns": [],
+            "reward_terms": [],
         }
         current_cumulative_rewards = torch.zeros(self._env.num_envs, dtype=torch.float)
         current_episode_lengths = torch.zeros(self._env.num_envs, dtype=torch.int)
@@ -82,6 +83,10 @@ class IsaaclabRunner:
                 # Gather statistics
                 if "log" in env_info:
                     episode_statistics["info"].append(env_info["log"])
+                # Collect reward_terms for TensorBoard logging
+                reward_terms = env_info.get("reward_terms")
+                if isinstance(reward_terms, dict):
+                    episode_statistics["reward_terms"].append(reward_terms)
                 dones_idx = (dones + env_info["time_outs"]).nonzero().cpu()
                 current_cumulative_rewards += rewards.cpu()
                 current_episode_lengths += 1
@@ -142,6 +147,7 @@ class IsaaclabRunner:
             "lengths": [],
             "returns": [],
             "training_info": {},
+            "reward_terms": [],
         }
         current_episode_lengths = torch.zeros(self._env.num_envs, dtype=torch.float)
         current_cumulative_rewards = torch.zeros(self._env.num_envs, dtype=torch.float)
@@ -187,6 +193,10 @@ class IsaaclabRunner:
                     # Gather statistics
                     if "log" in env_info:
                         episode_statistics["info"].append(env_info["log"])
+                    # Collect reward_terms for TensorBoard logging
+                    reward_terms = env_info.get("reward_terms")
+                    if isinstance(reward_terms, dict):
+                        episode_statistics["reward_terms"].append(reward_terms)
                     dones_idx = (dones + env_info["time_outs"]).nonzero().cpu()
                     current_cumulative_rewards += rewards.cpu()
                     current_episode_lengths += 1
@@ -213,6 +223,7 @@ class IsaaclabRunner:
             if terminate:
                 break
             episode_statistics["info"].clear()
+            episode_statistics["reward_terms"].clear()
 
     def load(self, path: str) -> Any:
         """Restores the agent and runner state from a file."""
