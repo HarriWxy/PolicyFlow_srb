@@ -130,12 +130,7 @@ class PolicyFlowOneStep(PolicyFlowBase):
     def draw_actions(
         self, observations_dict: Dict[str, torch.Tensor], env_info: Dict[str, Any]
     ) -> Tuple[torch.Tensor, Union[Dict[str, torch.Tensor], None]]:
-        '''Draw actions from the policy using single-step flow (OFP, NFE=1)
-
-        Uses RESIDUAL velocity (delta_vel) to stay consistent with the training
-        objective. The PPO ratio is computed between N(0, old_std) and
-        N(delta_vel, new_std), so both sides must agree on the velocity space.
-        '''
+        '''Draw actions from the policy using single-step flow (OFP, NFE=1)'''
 
         x0 = torch.randn(
             (
@@ -148,7 +143,7 @@ class PolicyFlowOneStep(PolicyFlowBase):
         if self._degenerate2gaussian:
             x0 = torch.zeros_like(x0)
 
-        # OFP single-step using RESIDUAL velocity (consistent with training)
+        # OFP single-step: action = z_0 + u(z_0, t=0 | o),  NFE = 1
         with torch.inference_mode():
             actions_prior, std = self.compute_one_step_velocity(
                 x0=x0,
@@ -183,35 +178,20 @@ class PolicyFlowOneStep(PolicyFlowBase):
         x0: torch.Tensor,
         condition: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Compute RESIDUAL velocity and std at t=0 for single-step flow (OFP).
-
-        Returns delta_vel = vel(model) - vel(model_last), consistent with the
-        training objective in compute_flow_variation. This ensures the PPO ratio
-        is comparing distributions in the same residual velocity space.
-
-        One-step action: a = z_0 + delta_vel(z_0, t=0 | o),  NFE = 2
+        """Compute velocity and std at t=0 for single-step flow inference (OFP).
+        
+        One-step action: a = z_0 + u(z_0, t=0 | o),  NFE = 1
         """
         actor = self.model_dict["actor"]
         model = actor.model
-        model_last = actor.model_last
 
         n_samples = condition.shape[0]
         t_zero = torch.zeros(n_samples, device=self.device)
-
-        # Current model velocity
         condition_embeded = model["condition"](condition)
         vel = model["flow"](x0, t_zero, condition_embeded)
-
-        # Frozen baseline velocity (residual reference)
-        with torch.inference_mode():
-            condition_embeded_last = model_last["condition"](condition)
-            vel_last = model_last["flow"](x0, t_zero, condition_embeded_last).detach()
-
-        # Residual velocity (matches compute_flow_variation)
-        delta_vel = vel - vel_last
         std = torch.ones(n_samples, self._action_size, device=self.device) * model["variance"].std
 
-        return delta_vel, std
+        return vel, std
 
     def process_transition(
         self,

@@ -5,6 +5,7 @@ from .agent import Agent
 from .policyflow.base import PolicyFlowBase
 from .policyflow.policyflow import PolicyFlow
 from .policyflow.config import PolicyFlowCfg, PolicyFlowCfgInstance
+from .policyflow.policyflowos import PolicyFlowOneStep
 
 from .ppo.base import ActorCriticBase
 from .ppo.ppo import PPO
@@ -20,4 +21,5 @@ __all__ = [
     "PPO",
     "PPOCfg",
     "PPOCfgInstance",
+    "PolicyFlowOneStep",
 ]

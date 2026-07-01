@@ -14,7 +14,7 @@ from policyflow.policyflow_torch.modules import (
     FlowMlp,
     GaussianNetwork,
 )
-from policyflow.policyflow_torch.agents import PolicyFlow, PolicyFlowCfgInstance, PPO, PPOCfgInstance
+from policyflow.policyflow_torch.agents import PolicyFlow, PolicyFlowCfgInstance, PPO, PPOCfgInstance, PolicyFlowOneStep
 from policyflow.policyflow_torch.runners import GymRunner
 
 torch.backends.cuda.matmul.allow_tf32 = True
@@ -26,8 +26,8 @@ import os
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 def main():
-    alg_name = "ppo"  # or "ppo" policyflow
-    env_name = "Ant-v5"
+    alg_name = "policyflow"  # or "ppo" policyflow
+    env_name = "MetaWorld/Hammer-v3" # Ant-v5
     wrapped_env = EnvPoolWrapper(env_name, num_envs=2048)
 
     obs_dict, _ = wrapped_env.reset()
@@ -73,7 +73,7 @@ def main():
         agent_cfg.gaussian_entropy_loss_scale = 0.01
         agent_cfg.brownian_reg_loss_scale = 0.0
 
-        agent = PolicyFlow(
+        agent = PolicyFlowOneStep(
             models=models,
             replay_buffer=replay_buffer,
             device=wrapped_env.device,
