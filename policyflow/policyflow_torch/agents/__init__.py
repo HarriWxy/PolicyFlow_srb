@@ -11,6 +11,9 @@ from .ppo.base import ActorCriticBase
 from .ppo.ppo import PPO
 from .ppo.config import PPOCfg, PPOCfgInstance
 
+from .exo.exo import Exo
+from .exo.config import ExoCfg, ExoCfgInstance
+
 __all__ = [
     "Agent",
     "PolicyFlowBase",
@@ -22,4 +25,7 @@ __all__ = [
     "PPOCfg",
     "PPOCfgInstance",
     "PolicyFlowOneStep",
+    "Exo",
+    "ExoCfg",
+    "ExoCfgInstance",
 ]

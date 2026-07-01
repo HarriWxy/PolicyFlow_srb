@@ -1,5 +1,4 @@
-from dataclasses import MISSING
-from isaaclab.utils import configclass
+from policyflow_torch.utils.config_compat import configclass, MISSING
 
 @configclass
 class PolicyFlowCfg:

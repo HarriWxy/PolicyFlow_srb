@@ -43,6 +43,30 @@ def get_ppo_models_cfg():
         },
     }
 
+def get_exo_models_cfg():
+    """Model config for Exo agent (Actor-Critic with Gaussian policy)."""
+    return {
+        "critic": {
+            "activations": ["mish", "mish", "mish", "linear"],
+            "hidden_dims": [512, 256, 128],
+            "init_fade": True,
+            "init_gain": 1.0,
+            "input_normalization": False,
+            "recurrent": False,
+        },
+        "actor": {
+            "log_std_max": 4.0,
+            "log_std_min": -20.0,
+            "std_init": 1.0,
+            "activations": ["mish", "mish", "mish", "linear"],
+            "hidden_dims": [512, 256, 128],
+            "init_fade": True,
+            "init_gain": 1.0,
+            "input_normalization": False,
+            "recurrent": False,
+        },
+    }
+
 def get_runner_cfg():
     return {
         "max_iterations": 40000,
